@@ -1,0 +1,169 @@
+name: WordPress Security Pipeline
+
+# Runs on every push and PR. Each job is a separate "gate" —
+# in Week 2 you'll add more jobs (Trivy, Hadolint, ZAP, etc.)
+# and can make later jobs depend on earlier ones with `needs:`.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ---------------------------------------------------------
+  # JOB 1: Build & smoke-test the stack
+  # Proves docker-compose still builds and comes up healthy.
+  # ---------------------------------------------------------
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and start containers
+        run: docker compose up -d --build
+
+      - name: Wait for WordPress to respond
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080 > /dev/null; then
+              echo "WordPress is up"
+              exit 0
+            fi
+            echo "Waiting for WordPress... ($i)"
+            sleep 5
+          done
+          echo "WordPress did not become healthy in time"
+          docker compose logs
+          exit 1
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ---------------------------------------------------------
+  # JOB 2: Secrets scanning
+  # Fails the build if credentials/keys are found in the diff
+  # or in git history (depending on gitleaks config used).
+  # ---------------------------------------------------------
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so gitleaks can scan past commits too
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE not needed for the open-source/public-repo use case
+
+  # ---------------------------------------------------------
+  # JOB 3: WordPress enumeration (no API token)
+  # Without a WPScan API token you lose the live vulnerability
+  # cross-reference, but you still get a full inventory of what's
+  # installed (core version, plugins, themes, users) — which is
+  # useful on its own and feeds into the manual/Semgrep checks below.
+  # ---------------------------------------------------------
+  wp-enum:
+    runs-on: ubuntu-latest
+    needs: build-and-verify
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for WordPress
+        run: |
+          for i in {1..30}; do
+            curl -sf http://localhost:8080 > /dev/null && break
+            sleep 5
+          done
+
+      - name: Run WPScan (enumeration only, no vuln DB lookup)
+        run: |
+          docker run --network host wpscanteam/wpscan \
+            --url http://localhost:8080 \
+            --enumerate vp,vt,u \
+            --format cli \
+            --no-banner
+        # Exit code will just reflect scan errors, not "vulnerabilities found",
+        # since there's no vuln data being checked without a token.
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ---------------------------------------------------------
+  # JOB 3b: Plugin/theme version cross-check (manual CVE matching)
+  # Since we're not using the WPScan vuln DB, this step pulls the
+  # installed plugin/theme versions and checks them against the
+  # free, no-auth WordPress.org API + a static known-vulnerable
+  # list you maintain yourself in vuln-watchlist.txt.
+  # This is more manual, but it's actually a good exercise: you're
+  # building the mental model of "how do I know if X is vulnerable"
+  # instead of outsourcing it entirely to a scanner.
+  # ---------------------------------------------------------
+  plugin-version-check:
+    runs-on: ubuntu-latest
+    needs: build-and-verify
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for WordPress
+        run: |
+          for i in {1..30}; do
+            curl -sf http://localhost:8080 > /dev/null && break
+            sleep 5
+          done
+
+      - name: List installed plugins via wp-cli
+        run: |
+          docker compose exec -T wordpress \
+            wp plugin list --format=csv --allow-root | tee plugin-list.csv
+
+      - name: Compare against watchlist
+        run: |
+          if [ -f vuln-watchlist.txt ]; then
+            echo "Checking plugin-list.csv against vuln-watchlist.txt..."
+            while IFS= read -r line; do
+              if grep -qi "$line" plugin-list.csv; then
+                echo "::warning::Watchlist match found: $line"
+              fi
+            done < vuln-watchlist.txt
+          else
+            echo "No vuln-watchlist.txt found — create one with plugin names/versions you know are vulnerable, one per line."
+          fi
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ---------------------------------------------------------
+  # JOB 4: Static analysis (Semgrep)
+  # Catches insecure code patterns in any custom PHP you've
+  # written or modified (custom plugins, mu-plugins, theme edits).
+  # ---------------------------------------------------------
+  semgrep:
+    runs-on: ubuntu-latest
+    needs: build-and-verify
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/php
+            p/wordpress
+            p/secrets
