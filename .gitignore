@@ -1,0 +1,12 @@
+# Environment & Secrets
+.env
+
+# Certificates & Private Keys
+certs/
+*.key
+*.crt
+
+# Runtime Logs
+*.log
+simple-file-list/logs/*.log
+simple-file-list/view/*.log
