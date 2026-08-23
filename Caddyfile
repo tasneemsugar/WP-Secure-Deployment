@@ -1,0 +1,25 @@
+(security_headers) {
+    # Set outgoing response security headers to the client
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self';"
+    }
+
+    # Intercept and modify headers coming from the backend (WordPress/Apache)
+    reverse_proxy wordpress:80 {
+        header_down -Server
+        header_down -X-Powered-By
+    }
+}
+
+:443 {
+    tls /certs/server.crt /certs/server.key
+    import security_headers
+}
+
+:80 {
+    import security_headers
+}
