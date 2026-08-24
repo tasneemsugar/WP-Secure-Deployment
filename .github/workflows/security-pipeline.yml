@@ -158,8 +158,8 @@ jobs:
 
       - name: List installed plugins via wp-cli
         run: |
-          docker compose exec -T wordpress \
-            wp plugin list --format=csv --allow-root | tee plugin-list.csv
+          docker compose exec -T wpcli \
+            wp plugin list --format=csv | tee plugin-list.csv
 
       - name: Compare against watchlist
         run: |
