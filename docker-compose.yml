@@ -23,7 +23,6 @@ services:
 
   wordpress:
     image: wordpress:7.0.2-php8.3-apache
-    container_name: wp_app
     restart: unless-stopped
     depends_on:
       db:
