@@ -5,7 +5,7 @@ name: WordPress Security Pipeline
 # and can make later jobs depend on earlier ones with `needs:`.
 on:
   push:
-    branches: [main, develop]
+    branches: [dev]
   pull_request:
     branches: [main]
 
