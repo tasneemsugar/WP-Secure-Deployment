@@ -16,7 +16,7 @@ jobs:
   # Proves docker-compose still builds and comes up healthy.
   # ---------------------------------------------------------
   build-and-verify:
-    runs-on: ubuntu-latest
+    runs-on: wpserver2-vm
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -69,7 +69,7 @@ jobs:
   # useful on its own and feeds into the manual/Semgrep checks below.
   # ---------------------------------------------------------
   wp-enum:
-    runs-on: ubuntu-latest
+    runs-on: wpserver2-vm
     needs: build-and-verify
     steps:
       - name: Checkout code
@@ -110,7 +110,7 @@ jobs:
   # instead of outsourcing it entirely to a scanner.
   # ---------------------------------------------------------
   plugin-version-check:
-    runs-on: ubuntu-latest
+    runs-on: wpserver2-vm
     needs: build-and-verify
     steps:
       - name: Checkout code
