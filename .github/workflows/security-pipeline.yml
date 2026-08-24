@@ -27,9 +27,6 @@ jobs:
           echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-
-      - name: Clean up existing containers
-        run: docker compose down -v --remove-orphans
       
       - name: Build and start containers
         run: docker compose up -d --build
@@ -92,8 +89,6 @@ jobs:
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
 
-      - name: Clean up existing containers
-        run: docker compose down -v --remove-orphans
 
       - name: Start the stack
         run: docker compose up -d --build
@@ -143,8 +138,6 @@ jobs:
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
 
-      - name: Clean up existing containers
-        run: docker compose down -v --remove-orphans
       
       - name: Start the stack
         run: docker compose up -d --build
