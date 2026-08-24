@@ -100,6 +100,17 @@ jobs:
             sleep 5
           done
 
+      - name: Install WordPress (fresh test instance)
+        run: |
+          docker compose exec -T wpcli \
+            wp core install \
+            --url="http://localhost:8080" \
+            --title="Security Test Site" \
+            --admin_user="admin" \
+            --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
+            --admin_email="test@example.com" \
+            --skip-email
+
       - name: Run WPScan (enumeration only, no vuln DB lookup)
         run: |
           docker run --network host wpscanteam/wpscan \
@@ -148,6 +159,17 @@ jobs:
             curl -sf http://localhost:8080 > /dev/null && break
             sleep 5
           done
+
+      - name: Install WordPress (fresh test instance)
+        run: |
+          docker compose exec -T wpcli \
+            wp core install \
+            --url="http://localhost:8080" \
+            --title="Security Test Site" \
+            --admin_user="admin" \
+            --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
+            --admin_email="test@example.com" \
+            --skip-email
 
       - name: List installed plugins via wp-cli
         run: |
