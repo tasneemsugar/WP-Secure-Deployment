@@ -9,6 +9,14 @@ on:
   pull_request:
     branches: [main]
 
+# gitleaks-action needs to read PR commit data to scan a pull request's
+# changes; some accounts default GITHUB_TOKEN to a minimal scope that
+# excludes this, causing a 403 "Resource not accessible by integration".
+# Granting it explicitly here fixes that without widening anything else.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
 
   # ---------------------------------------------------------
@@ -114,9 +122,9 @@ jobs:
       - name: Run WPScan (enumeration only)
         run: |
           docker run --network host wpscanteam/wpscan \
-            --update
+            --update \
             --url http://localhost:8080 \
-            --enumerate vp,vt,u \
+            --enumerate p,t,u \
             --format cli \
             --no-banner
         # Exit code will just reflect scan errors, not "vulnerabilities found",

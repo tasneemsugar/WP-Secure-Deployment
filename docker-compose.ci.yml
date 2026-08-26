@@ -1,0 +1,75 @@
+# CI/TEST stack — ephemeral, built fresh and destroyed on every pipeline run.
+#
+# The security workflow targets this file explicitly with its own project
+# name, so its volumes and containers never collide with docker-compose.prod.yml:
+#   docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
+#   docker compose -f docker-compose.ci.yml -p wp-ci down -v
+#
+# No Caddy here — CI talks to WordPress directly over plain http on
+# localhost:8080, since there's no real traffic or TLS concern for a
+# throwaway test instance that lives for a few minutes.
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - wpnet
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  wordpress:
+    image: wordpress:7.0.2-php8.3-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_TABLE_PREFIX: wp_
+      WORDPRESS_CONFIG_EXTRA: |
+        define('AUTOMATIC_UPDATER_DISABLED', true);
+        define('WP_AUTO_UPDATE_CORE', false);
+        define('WP_DEBUG', false);
+        define('DISALLOW_FILE_EDIT', true);
+    volumes:
+      - wp_data:/var/www/html
+    networks:
+      - wpnet
+
+  wpcli:
+    image: wordpress:cli-2-php8.3
+    depends_on:
+      db:
+        condition: service_healthy
+    user: "33:33"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - wp_data:/var/www/html
+    networks:
+      - wpnet
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+networks:
+  wpnet:
+    driver: bridge
+
+volumes:
+  db_data:
+  wp_data:
