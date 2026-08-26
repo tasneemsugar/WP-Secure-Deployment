@@ -119,6 +119,15 @@ jobs:
             --admin_email="test@example.com" \
             --skip-email
 
+      - name: Install a known-vulnerable plugin (deliberate test target)
+        run: |
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+            wp plugin install wp-file-manager --version=6.0 --activate
+        # File Manager 6.0 has a well-documented, widely cataloged
+        # vulnerability (CVE-2020-25213). Installed here purely so
+        # WPScan/the watchlist check have something real to detect —
+        # not used or exploited, just present as a scan target.
+
       - name: Run WPScan (enumeration only)
         run: |
           docker run --network host wpscanteam/wpscan \
@@ -180,6 +189,15 @@ jobs:
             --admin_email="test@example.com" \
             --skip-email
 
+      - name: Install a known-vulnerable plugin (deliberate test target)
+        run: |
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+            wp plugin install wp-file-manager --version=6.0 --activate
+        # File Manager 6.0 has a well-documented, widely cataloged
+        # vulnerability (CVE-2020-25213). Installed here purely so
+        # WPScan/the watchlist check have something real to detect —
+        # not used or exploited, just present as a scan target.
+
       - name: List installed plugins via wp-cli
         run: |
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
@@ -221,3 +239,134 @@ jobs:
             p/php
             p/wordpress
             p/secrets
+
+  # ---------------------------------------------------------
+  # JOB 5: IaC misconfiguration scanning (Trivy config)
+  # Scans docker-compose.ci.yml for insecure settings — things
+  # like missing resource limits, risky capabilities, exposed
+  # ports beyond what's intended. No running stack needed, this
+  # just reads the compose file itself.
+  #
+  # NOTE — no Hadolint job yet: your services all use pre-built
+  # official images (mariadb, wordpress, wpcli) with no custom
+  # Dockerfile to lint. If you ever add one (a custom plugin build
+  # step, a hardened base image, etc.), add a Hadolint job here
+  # following the same pattern as the jobs below.
+  # ---------------------------------------------------------
+  trivy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "config"
+          scan-ref: "docker-compose.ci.yml"
+          format: "table"
+          exit-code: "0"   # report-only for now — see note below
+          severity: "CRITICAL,HIGH"
+        # exit-code 0 = report findings without failing the build yet.
+        # Once you've reviewed a baseline of what it flags, change this
+        # to "1" so CRITICAL/HIGH findings actually block the pipeline —
+        # same "report first, gate later" approach as Week 1.
+
+  # ---------------------------------------------------------
+  # JOB 6: Container image vulnerability scanning (Trivy image)
+  # Scans the actual images for known CVEs in OS packages and
+  # language dependencies baked into the image itself. Doesn't
+  # need the stack running — just needs the images pulled.
+  # ---------------------------------------------------------
+  trivy-image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - "wordpress:7.0.2-php8.3-apache"
+          - "mariadb:11"
+          - "wordpress:cli-2-php8.3"
+    steps:
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.image }}
+          format: "table"
+          exit-code: "0"   # report-only for now, same reasoning as above
+          severity: "CRITICAL,HIGH"
+        # A matrix job runs once per image in parallel, so you get a
+        # separate scan result for each — clearer than one combined wall
+        # of output for three unrelated images.
+
+  # ---------------------------------------------------------
+  # JOB 7: Dynamic scanning (OWASP ZAP baseline)
+  # Runs against the actual live test instance rather than static
+  # files — catches things that only show up at runtime (missing
+  # security headers, exposed paths, etc.). This is the "shift-left
+  # but still verify at runtime" step tying the pipeline together.
+  # ---------------------------------------------------------
+  zap-baseline:
+    runs-on: self-hosted
+    needs: build-and-verify
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          echo "MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}" >> .env
+          echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
+          echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
+          echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
+
+      - name: Start the stack
+        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
+
+      - name: Wait for WordPress
+        run: |
+          for i in {1..30}; do
+            curl -sf http://localhost:8080 > /dev/null && break
+            sleep 5
+          done
+
+      - name: Install WordPress (fresh test instance)
+        run: |
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+            wp core install \
+            --url="http://localhost:8080" \
+            --title="Security Test Site" \
+            --admin_user="admin" \
+            --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
+            --admin_email="test@example.com" \
+            --skip-email
+
+      - name: Install a known-vulnerable plugin (deliberate test target)
+        run: |
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+            wp plugin install wp-file-manager --version=6.0 --activate
+        # File Manager 6.0 has a well-documented, widely cataloged
+        # vulnerability (CVE-2020-25213). Installed here purely so
+        # WPScan/the watchlist check have something real to detect —
+        # not used or exploited, just present as a scan target.
+
+      - name: Run ZAP baseline scan
+        run: |
+          docker run --network host -v $(pwd):/zap/wrk/:rw \
+            zaproxy/zap-stable zap-baseline.py \
+            -t http://localhost:8080 \
+            -r zap-report.html \
+            -I
+        # -I = don't fail the build on findings yet (report-only, same
+        # pattern as the Trivy jobs). Drop -I once you've reviewed a
+        # baseline of what a deliberately-vulnerable site triggers.
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-report.html
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
