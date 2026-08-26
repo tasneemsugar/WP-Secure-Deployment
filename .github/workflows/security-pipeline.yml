@@ -111,9 +111,10 @@ jobs:
             --admin_email="test@example.com" \
             --skip-email
 
-      - name: Run WPScan (enumeration only, no vuln DB lookup)
+      - name: Run WPScan (enumeration only)
         run: |
           docker run --network host wpscanteam/wpscan \
+            --update
             --url http://localhost:8080 \
             --enumerate vp,vt,u \
             --format cli \
