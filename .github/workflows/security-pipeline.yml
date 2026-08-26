@@ -116,7 +116,7 @@ jobs:
           docker run --network host wpscanteam/wpscan \
             --update \
             --url http://localhost:8080 \
-            --enumerate vp,vt,u \
+            --enumerate p,t,u \
             --format cli \
             --no-banner
         # Exit code will just reflect scan errors, not "vulnerabilities found",
