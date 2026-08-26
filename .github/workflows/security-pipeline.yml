@@ -29,7 +29,7 @@ jobs:
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
       
       - name: Build and start containers
-        run: docker compose up -d --build
+        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
 
       - name: Wait for WordPress to respond
         run: |
@@ -42,12 +42,12 @@ jobs:
             sleep 5
           done
           echo "WordPress did not become healthy in time"
-          docker compose logs
+          docker compose -f docker-compose.ci.yml -p wp-ci logs
           exit 1
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
 
   # ---------------------------------------------------------
   # JOB 2: Secrets scanning
@@ -91,7 +91,7 @@ jobs:
 
 
       - name: Start the stack
-        run: docker compose up -d --build
+        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
 
       - name: Wait for WordPress
         run: |
@@ -102,7 +102,7 @@ jobs:
 
       - name: Install WordPress (fresh test instance)
         run: |
-          docker compose exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp core install \
             --url="http://localhost:8080" \
             --title="Security Test Site" \
@@ -123,7 +123,7 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
 
   # ---------------------------------------------------------
   # JOB 3b: Plugin/theme version cross-check (manual CVE matching)
@@ -151,7 +151,7 @@ jobs:
 
       
       - name: Start the stack
-        run: docker compose up -d --build
+        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
 
       - name: Wait for WordPress
         run: |
@@ -162,7 +162,7 @@ jobs:
 
       - name: Install WordPress (fresh test instance)
         run: |
-          docker compose exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp core install \
             --url="http://localhost:8080" \
             --title="Security Test Site" \
@@ -173,7 +173,7 @@ jobs:
 
       - name: List installed plugins via wp-cli
         run: |
-          docker compose exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp plugin list --format=csv | tee plugin-list.csv
 
       - name: Compare against watchlist
@@ -191,7 +191,7 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
 
   # ---------------------------------------------------------
   # JOB 4: Static analysis (Semgrep)
