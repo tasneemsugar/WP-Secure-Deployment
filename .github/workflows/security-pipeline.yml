@@ -203,7 +203,15 @@ jobs:
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp plugin list --format=csv | tee plugin-list.csv
 
-      - name: Compare against watchlist
+      - name: Check plugins against Wordfence Intelligence feed
+        env:
+          WORDFENCE_API_KEY: ${{ secrets.WORDFENCE_API_KEY }}
+        run: |
+          pip install packaging --break-system-packages --quiet
+          python3 check_wordfence_feed.py plugin-list.csv
+        continue-on-error: true
+
+      - name: Compare against manual watchlist
         run: |
           if [ -f vuln-watchlist.txt ]; then
             echo "Checking plugin-list.csv against vuln-watchlist.txt..."
@@ -215,6 +223,9 @@ jobs:
           else
             echo "No vuln-watchlist.txt found — create one with plugin names/versions you know are vulnerable, one per line."
           fi
+        # Kept as a manual backstop for anything you've researched yourself
+        # that the automated feed check above might not catch (e.g. very
+        # recent disclosures, or the free feed lagging Patchstack's paid tier).
 
       - name: Tear down
         if: always()
