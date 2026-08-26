@@ -114,7 +114,7 @@ jobs:
       - name: Run WPScan (enumeration only)
         run: |
           docker run --network host wpscanteam/wpscan \
-            --update
+            --update \
             --url http://localhost:8080 \
             --enumerate vp,vt,u \
             --format cli \
