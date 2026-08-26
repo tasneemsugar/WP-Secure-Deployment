@@ -102,8 +102,6 @@ jobs:
 
       - name: Install WordPress (fresh test instance)
         run: |
-
-          docker compose exec -T wpcli \
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp core install \
             --url="http://localhost:8080" \
@@ -113,8 +111,6 @@ jobs:
             --admin_email="test@example.com" \
             --skip-email
 
-
-    
       - name: Run WPScan (enumeration only)
         run: |
           docker run --network host wpscanteam/wpscan \
@@ -167,9 +163,6 @@ jobs:
 
       - name: Install WordPress (fresh test instance)
         run: |
-
-          docker compose exec -T wpcli \
-
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp core install \
             --url="http://localhost:8080" \
