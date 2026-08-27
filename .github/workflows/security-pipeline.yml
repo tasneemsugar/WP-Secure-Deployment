@@ -359,8 +359,12 @@ jobs:
 
       - name: Install a known-vulnerable plugin (deliberate test target)
         run: |
+          # Copy the zip from the runner into the container's /tmp directory
+          docker compose -f docker-compose.ci.yml -p wp-ci cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
+
+          # Install using the path inside the container
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
-            wp plugin install ./tests/fixtures/simple-file-list.zip --activate
+            wp plugin install /tmp/plugin.zip --activate
         
         # WPScan/the watchlist check have something real to detect —
         # not used or exploited, just present as a scan target.
