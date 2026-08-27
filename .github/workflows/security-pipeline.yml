@@ -126,7 +126,7 @@ jobs:
 
           # Install using the path inside the container
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
-            wp plugin install /tmp/plugin.zip --activate
+            wp plugin install /tmp/plugin.zip --force --activate
        
         # WPScan/the watchlist check have something real to detect —
         # not used or exploited, just present as a scan target.
@@ -199,7 +199,7 @@ jobs:
 
           # Install using the path inside the container
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
-            wp plugin install /tmp/plugin.zip --activate
+            wp plugin install /tmp/plugin.zip --force --activate
         
         # WPScan/the watchlist check have something real to detect —
         # not used or exploited, just present as a scan target.
@@ -364,7 +364,7 @@ jobs:
 
           # Install using the path inside the container
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
-            wp plugin install /tmp/plugin.zip --activate
+            wp plugin install /tmp/plugin.zip --force --activate
         
         # WPScan/the watchlist check have something real to detect —
         # not used or exploited, just present as a scan target.
