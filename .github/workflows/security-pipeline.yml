@@ -371,7 +371,7 @@ jobs:
 
       - name: Run ZAP baseline scan
         run: |
-          docker run --user root--network host -v $(pwd):/zap/wrk/:rw \
+          docker run --user root --network host -v $(pwd):/zap/wrk/:rw \
             zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:8080 \
             -r zap-report.html \
