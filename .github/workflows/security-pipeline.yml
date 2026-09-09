@@ -77,86 +77,15 @@ jobs:
           # GITLEAKS_LICENSE not needed for the open-source/public-repo use case
 
   # ---------------------------------------------------------
-  # JOB 3: WordPress enumeration (no API token)
-  # Without a WPScan API token you lose the live vulnerability
-  # cross-reference, but you still get a full inventory of what's
-  # installed (core version, plugins, themes, users) — which is
-  # useful on its own and feeds into the manual/Semgrep checks below.
+  # JOB 3: WordPress security audit (Wordfence feed + wp-cli)
+  # Replaces the earlier WPScan-based approach entirely. Pulls
+  # installed plugin versions via wp-cli, cross-references them
+  # against the Wordfence Intelligence vulnerability feed, and
+  # separately lists registered usernames — the one thing WPScan
+  # was doing that this doesn't otherwise cover (a different kind
+  # of finding: information disclosure, not a version/CVE issue).
   # ---------------------------------------------------------
-  wp-enum:
-    runs-on: self-hosted
-    needs: build-and-verify
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Create .env file
-        run: |
-          echo "MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}" >> .env
-          echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
-          echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
-          echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-
-
-      - name: Start the stack
-        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
-
-      - name: Wait for WordPress
-        run: |
-          for i in {1..30}; do
-            curl -sf http://localhost:8080 > /dev/null && break
-            sleep 5
-          done
-
-      - name: Install WordPress (fresh test instance)
-        run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
-            wp core install \
-            --url="http://localhost:8080" \
-            --title="Security Test Site" \
-            --admin_user="admin" \
-            --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
-            --admin_email="test@example.com" \
-            --skip-email
-
-      - name: Install a known-vulnerable plugin (deliberate test target)
-        run: |
-          # Copy the zip from the runner into the container's /tmp directory
-          docker compose -f docker-compose.ci.yml -p wp-ci cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
-
-          # Install using the path inside the container
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
-            wp plugin install /tmp/plugin.zip --force --activate
-       
-        # WPScan/the watchlist check have something real to detect —
-        # not used or exploited, just present as a scan target.
-
-      - name: Run WPScan (enumeration only)
-        run: |
-          docker run --network host wpscanteam/wpscan \
-            --update \
-            --url http://localhost:8080 \
-            --enumerate p,t,u \
-            --format cli \
-            --no-banner
-        # Exit code will just reflect scan errors, not "vulnerabilities found",
-        # since there's no vuln data being checked without a token.
-
-      - name: Tear down
-        if: always()
-        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
-
-  # ---------------------------------------------------------
-  # JOB 3b: Plugin/theme version cross-check (manual CVE matching)
-  # Since we're not using the WPScan vuln DB, this step pulls the
-  # installed plugin/theme versions and checks them against the
-  # free, no-auth WordPress.org API + a static known-vulnerable
-  # list you maintain yourself in vuln-watchlist.txt.
-  # This is more manual, but it's actually a good exercise: you're
-  # building the mental model of "how do I know if X is vulnerable"
-  # instead of outsourcing it entirely to a scanner.
-  # ---------------------------------------------------------
-  plugin-version-check:
+  wp-security-audit:
     runs-on: self-hosted
     needs: build-and-verify
     steps:
@@ -208,6 +137,15 @@ jobs:
         run: |
           docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
             wp plugin list --format=csv | tee plugin-list.csv
+
+      - name: List registered usernames via wp-cli
+        run: |
+          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+            wp user list --field=user_login | tee user-list.txt
+          echo "::notice::Registered usernames are visible above. On a real"
+          echo "site, an easily-guessable username (like 'admin') paired with"
+          echo "a weak password is a common attack path — this step just"
+          echo "surfaces what's exposed, it doesn't attempt any login."
 
       - name: Check plugins against Wordfence Intelligence feed
         env:
@@ -371,7 +309,7 @@ jobs:
 
       - name: Run ZAP baseline scan
         run: |
-          docker run --user root --network host -v $(pwd):/zap/wrk/:rw \
+          docker run --network host -v $(pwd):/zap/wrk/:rw \
             zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:8080 \
             -r zap-report.html \
