@@ -171,6 +171,15 @@ jobs:
         # that the automated feed check above might not catch (e.g. very
         # recent disclosures, or the free feed lagging Patchstack's paid tier).
 
+      - name: Upload plugin & user lists
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wp-security-audit-lists
+          path: |
+            plugin-list.csv
+            user-list.txt
+
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
@@ -220,12 +229,20 @@ jobs:
           scan-type: "config"
           scan-ref: "docker-compose.ci.yml"
           format: "table"
+          output: "trivy-config-report.txt"
           exit-code: "0"   # report-only for now — see note below
           severity: "CRITICAL,HIGH"
         # exit-code 0 = report findings without failing the build yet.
         # Once you've reviewed a baseline of what it flags, change this
         # to "1" so CRITICAL/HIGH findings actually block the pipeline —
         # same "report first, gate later" approach as Week 1.
+
+      - name: Upload Trivy config report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-config-report
+          path: trivy-config-report.txt
 
   # ---------------------------------------------------------
   # JOB 6: Container image vulnerability scanning (Trivy image)
@@ -242,16 +259,32 @@ jobs:
           - "mariadb:11"
           - "wordpress:cli-2-php8.3"
     steps:
+      - name: Sanitize image name for use in filenames
+        run: |
+          SAFE_NAME=$(echo "${{ matrix.image }}" | tr '/:' '--')
+          echo "SAFE_NAME=$SAFE_NAME" >> "$GITHUB_ENV"
+        # matrix.image contains ':' (and sometimes '/'), neither of which
+        # are valid in artifact names or filenames — this swaps them for
+        # '-' so e.g. "wordpress:cli-2-php8.3" becomes a safe filename.
+
       - name: Run Trivy image scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ matrix.image }}
           format: "table"
+          output: "trivy-image-${{ env.SAFE_NAME }}.txt"
           exit-code: "0"   # report-only for now, same reasoning as above
           severity: "CRITICAL,HIGH"
         # A matrix job runs once per image in parallel, so you get a
         # separate scan result for each — clearer than one combined wall
         # of output for three unrelated images.
+
+      - name: Upload Trivy image report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-report-${{ env.SAFE_NAME }}
+          path: trivy-image-${{ env.SAFE_NAME }}.txt
 
   # ---------------------------------------------------------
   # JOB 7: Dynamic scanning (OWASP ZAP baseline)
