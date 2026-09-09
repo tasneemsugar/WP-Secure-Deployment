@@ -11,18 +11,78 @@ secret named WORDFENCE_API_KEY.
 Docs: https://www.wordfence.com/help/wordfence-intelligence/v3-accessing-and-consuming-the-vulnerability-data-feed/
 
 Also note: v3 defaults to a rate limit of 1 request per 30 minutes.
-Don't re-run this script (or the CI job that calls it) more often than
-that, or you'll get throttled.
+To avoid hitting this while re-running CI repeatedly during development,
+this script caches the feed to disk (outside the git checkout, so it
+survives actions/checkout resetting the workspace each run) and reuses
+it if it's less than CACHE_MAX_AGE_SECONDS old. If a fresh fetch hits a
+429, it falls back to a stale cache rather than failing outright.
 """
 import csv
 import json
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
 from packaging.version import Version, InvalidVersion
 
 FEED_URL = "https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production"
+
+# Stored in the runner user's home directory, not the repo checkout —
+# actions/checkout resets the workspace each run, but this path persists
+# across runs on the same self-hosted runner.
+CACHE_PATH = os.path.expanduser("~/.cache/wordfence_feed_v3.json")
+
+# Kept under the real 30-minute limit with a safety margin, in case a
+# run starts right as the window is about to expire.
+CACHE_MAX_AGE_SECONDS = 25 * 60
+
+
+def load_cache():
+    if not os.path.exists(CACHE_PATH):
+        return None, None
+    age = time.time() - os.path.getmtime(CACHE_PATH)
+    with open(CACHE_PATH) as f:
+        feed = json.load(f)
+    return feed, age
+
+
+def save_cache(feed):
+    os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+    with open(CACHE_PATH, "w") as f:
+        json.dump(feed, f)
+
+
+def fetch_feed(api_key):
+    print("Downloading Wordfence Intelligence v3 production feed (this can take a moment)...")
+    req = urllib.request.Request(FEED_URL, headers={"Authorization": f"Bearer {api_key}"})
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+
+def get_feed(api_key):
+    cached_feed, age = load_cache()
+
+    if cached_feed is not None and age < CACHE_MAX_AGE_SECONDS:
+        print(f"Using cached feed ({int(age)}s old, under the {CACHE_MAX_AGE_SECONDS}s limit).")
+        return cached_feed
+
+    try:
+        feed = fetch_feed(api_key)
+        save_cache(feed)
+        return feed
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print("401 Unauthorized — check WORDFENCE_API_KEY is set correctly.")
+            raise
+        if e.code == 429:
+            if cached_feed is not None:
+                print(f"429 Rate limited — falling back to stale cache ({int(age)}s old).")
+                return cached_feed
+            print("429 Rate limited, and no cache available to fall back to.")
+            print("v3 defaults to 1 request per 30 minutes — wait and retry.")
+            raise
+        raise
 
 
 def version_in_range(installed: str, from_v: str, from_incl: bool, to_v: str, to_incl: bool) -> bool:
@@ -56,17 +116,7 @@ def main():
         print("WORDFENCE_API_KEY environment variable not set — skipping feed check.")
         sys.exit(0)
 
-    print("Downloading Wordfence Intelligence v3 production feed (this can take a moment)...")
-    req = urllib.request.Request(FEED_URL, headers={"Authorization": f"Bearer {api_key}"})
-    try:
-        with urllib.request.urlopen(req) as resp:
-            feed = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            print("401 Unauthorized — check WORDFENCE_API_KEY is set correctly.")
-        elif e.code == 429:
-            print("429 Rate limited — v3 defaults to 1 request per 30 minutes.")
-        raise
+    feed = get_feed(api_key)
 
     # Index feed by plugin slug for fast lookup, since the feed is one
     # big dict keyed by vulnerability UUID rather than by plugin.
