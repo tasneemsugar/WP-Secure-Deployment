@@ -249,6 +249,7 @@ jobs:
   trivy-image:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         image:
           - "wordpress:7.0.2-php8.3-apache"
@@ -341,7 +342,8 @@ jobs:
           docker run --network host --user root -v $(pwd):/zap/wrk/:rw \
             zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:8080 \
-            -r zap-report.html
+            -r zap-report.html \
+            -I
         # --user root: without this, ZAP's default non-root container user
         # often can't write zap-report.html into the mounted $(pwd) volume,
         # depending on host directory ownership/permissions.
