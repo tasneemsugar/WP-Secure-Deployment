@@ -5,7 +5,7 @@ name: WordPress Security Pipeline
 # and can make later jobs depend on earlier ones with `needs:`.
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   pull_request:
     branches: [main]
 
@@ -153,7 +153,7 @@ jobs:
         run: |
           pip install packaging --break-system-packages --quiet
           python3 check_wordfence_feed.py plugin-list.csv
-        continue-on-error: true
+        # No longer continue-on-error: a real CVE match now fails the job.
 
       - name: Compare against manual watchlist
         run: |
@@ -230,12 +230,8 @@ jobs:
           scan-ref: "docker-compose.ci.yml"
           format: "table"
           output: "trivy-config-report.txt"
-          exit-code: "0"   # report-only for now — see note below
+          exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
           severity: "CRITICAL,HIGH"
-        # exit-code 0 = report findings without failing the build yet.
-        # Once you've reviewed a baseline of what it flags, change this
-        # to "1" so CRITICAL/HIGH findings actually block the pipeline —
-        # same "report first, gate later" approach as Week 1.
 
       - name: Upload Trivy config report
         if: always()
@@ -273,7 +269,7 @@ jobs:
           image-ref: ${{ matrix.image }}
           format: "table"
           output: "trivy-image-${{ env.SAFE_NAME }}.txt"
-          exit-code: "0"   # report-only for now, same reasoning as above
+          exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
           severity: "CRITICAL,HIGH"
         # A matrix job runs once per image in parallel, so you get a
         # separate scan result for each — clearer than one combined wall
@@ -342,14 +338,14 @@ jobs:
 
       - name: Run ZAP baseline scan
         run: |
-          docker run --user root --network host -v $(pwd):/zap/wrk/:rw \
+          docker run --network host --user root -v $(pwd):/zap/wrk/:rw \
             zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:8080 \
-            -r zap-report.html \
-            -I
-        # -I = don't fail the build on findings yet (report-only, same
-        # pattern as the Trivy jobs). Drop -I once you've reviewed a
-        # baseline of what a deliberately-vulnerable site triggers.
+            -r zap-report.html
+        # --user root: without this, ZAP's default non-root container user
+        # often can't write zap-report.html into the mounted $(pwd) volume,
+        # depending on host directory ownership/permissions.
+        # -I removed: FAIL-level ZAP findings now fail this job.
 
       - name: Upload ZAP report
         if: always()
@@ -361,3 +357,53 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
+
+  # ---------------------------------------------------------
+  # JOB 8: Deploy to production (CD)
+  # Only runs on a direct push to main — which, given your branch
+  # protection rule, only happens via a PR merge that already passed
+  # every gate above. This job doesn't re-run any checks; it trusts
+  # that main is already known-good and just applies the change.
+  #
+  # This works cleanly here because your self-hosted runner IS the
+  # production VM — deploying is just "update the files, restart the
+  # stack" on the same machine. In a typical real-world setup, CI
+  # infrastructure and production are separate machines, so deployment
+  # usually means SSH-ing out, or using something like Ansible/Kubernetes/
+  # a cloud provider's deploy API — worth knowing this is a simplified
+  # version of a pattern that gets more involved at scale.
+  # ---------------------------------------------------------
+  deploy:
+    runs-on: self-hosted
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Pull latest main into the production directory
+        run: |
+          cd ~/wp/WP-Secure-Deployment
+          git fetch origin main
+          git checkout main
+          git pull origin main
+        # Uses the actual production working directory on the VM directly,
+        # not the runner's ephemeral checkout — this IS the directory
+        # docker-compose.prod.yml runs from.
+
+      - name: Apply the change to the production stack
+        run: |
+          cd ~/wp/WP-Secure-Deployment
+          docker compose -f docker-compose.prod.yml -p wp-prod up -d
+        # No --build unless your change touched something that needs
+        # rebuilding (e.g. a custom Dockerfile, if you add one later).
+        # This restarts only what changed since the last apply.
+
+      - name: Confirm the production site responded after deploy
+        run: |
+          for i in {1..15}; do
+            curl -sf http://localhost:8080 > /dev/null && echo "Production responded OK" && exit 0
+            sleep 5
+          done
+          echo "::error::Production did not respond after deploy — check it manually."
+          exit 1
+        # Deliberately does NOT roll back automatically — for a learning
+        # project, seeing a real failed deploy and fixing it by hand is
+        # more instructive than papering over it with auto-rollback logic
+        # you haven't built or tested yet.
