@@ -10,7 +10,7 @@
 # throwaway test instance that lives for a few minutes.
 services:
   db:
-    image: mariadb:11.8
+    image: mariadb:11.4
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
@@ -27,7 +27,7 @@ services:
       retries: 5
 
   wordpress:
-    image: wordpress:php8.5-fpm-alpine
+    image: wordpress:7.1-apache
     depends_on:
       db:
         condition: service_healthy
