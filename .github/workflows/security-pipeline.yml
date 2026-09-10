@@ -256,6 +256,31 @@ jobs:
           path: trivy-config-report.json
 
   # ---------------------------------------------------------
+  # JOB 5b: Detect images from docker-compose.ci.yml
+  # Reads the actual compose file's resolved image list, rather than
+  # hardcoding image tags separately in this workflow — so updating an
+  # image version in one place (the compose file) is enough; nothing
+  # here can drift out of sync with it.
+  # ---------------------------------------------------------
+  detect-images:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: List images from docker-compose.ci.yml
+        id: list
+        run: |
+          IMAGES_JSON=$(docker compose -f docker-compose.ci.yml config --images | jq -R -s -c 'split("\n")[:-1]')
+          echo "images=$IMAGES_JSON" >> "$GITHUB_OUTPUT"
+        # `docker compose config --images` resolves the compose file and
+        # prints one image per line — the same thing Compose itself will
+        # actually pull/build, so this can't drift from reality the way
+        # a manually maintained list could.
+
+  # ---------------------------------------------------------
   # JOB 6: Container image vulnerability scanning (Trivy image)
   # Scans the actual images for known CVEs in OS packages and
   # language dependencies baked into the image itself. Doesn't
@@ -263,13 +288,11 @@ jobs:
   # ---------------------------------------------------------
   trivy-image:
     runs-on: ubuntu-latest
+    needs: detect-images
     strategy:
       fail-fast: false   # one image failing shouldn't cancel scans of the others
       matrix:
-        image:
-          - "wordpress:7.0.2-php8.3-apache"
-          - "mariadb:11"
-          - "wordpress:cli-2-php8.3"
+        image: ${{ fromJson(needs.detect-images.outputs.images) }}
     steps:
       - name: Sanitize image name for use in filenames
         run: |
