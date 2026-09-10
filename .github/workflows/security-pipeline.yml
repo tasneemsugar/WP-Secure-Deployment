@@ -179,6 +179,7 @@ jobs:
           path: |
             plugin-list.csv
             user-list.txt
+            wordfence-findings.json
 
       - name: Tear down
         if: always()
@@ -441,3 +442,74 @@ jobs:
         # project, seeing a real failed deploy and fixing it by hand is
         # more instructive than papering over it with auto-rollback logic
         # you haven't built or tested yet.
+
+  # ---------------------------------------------------------
+  # JOB 9: Security summary (aggregation + PR comment)
+  # Pulls together the JSON artifacts from the scanning jobs into one
+  # consolidated markdown report, posted as a single PR comment — so
+  # you get one place to look instead of clicking through every job's
+  # log and artifact separately. Uses `if: always()` so it still runs
+  # (and reports) even when the jobs it depends on failed, which is
+  # exactly when you want the summary most.
+  #
+  # Only runs on pull_request events, since posting a PR comment needs
+  # a PR to comment on.
+  # ---------------------------------------------------------
+  security-summary:
+    runs-on: ubuntu-latest
+    if: always() && github.event_name == 'pull_request'
+    needs: [trivy-config, trivy-image, wp-security-audit, zap-baseline]
+    permissions:
+      pull-requests: write   # job-level override; workflow default is read-only
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        # Needed for build_summary.py itself, not for any scan data.
+
+      - name: Download all report artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: reports
+        continue-on-error: true
+        # continue-on-error: if every upstream job failed early enough
+        # that no artifacts exist at all, don't let that block the
+        # summary step below — build_summary.py handles missing files
+        # gracefully and reports "no report found" per section instead.
+
+      - name: Build consolidated summary
+        run: python3 build_summary.py reports > summary.md
+
+      - name: Post or update PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('summary.md', 'utf8');
+            const marker = '<!-- security-pipeline-summary -->';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+        # Finds and updates the same comment on re-runs (matching on the
+        # marker embedded in summary.md) instead of spamming a new comment
+        # every time you push another commit to the PR.
