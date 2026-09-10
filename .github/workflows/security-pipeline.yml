@@ -228,17 +228,31 @@ jobs:
         with:
           scan-type: "config"
           scan-ref: "docker-compose.ci.yml"
-          format: "table"
-          output: "trivy-config-report.txt"
+          format: "json"
+          output: "trivy-config-report.json"
           exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
           severity: "CRITICAL,HIGH"
+        # format: json — chosen over "table" so a future summary job can
+        # actually parse this programmatically instead of scraping text.
+
+      - name: Print human-readable summary to the log
+        if: always()
+        run: |
+          echo "=== Trivy config findings (CRITICAL/HIGH) ==="
+          jq -r '
+            .Results[]? | select(.Misconfigurations != null) |
+            .Misconfigurations[] |
+            "[\(.Severity)] \(.ID): \(.Title)"
+          ' trivy-config-report.json || echo "No findings, or nothing to parse."
+        # The JSON file is now the source of truth for tooling; this step
+        # just keeps the log readable at a glance without opening the artifact.
 
       - name: Upload Trivy config report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-config-report
-          path: trivy-config-report.txt
+          path: trivy-config-report.json
 
   # ---------------------------------------------------------
   # JOB 6: Container image vulnerability scanning (Trivy image)
@@ -249,7 +263,7 @@ jobs:
   trivy-image:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: false   # one image failing shouldn't cancel scans of the others
       matrix:
         image:
           - "wordpress:7.0.2-php8.3-apache"
@@ -268,20 +282,32 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ matrix.image }}
-          format: "table"
-          output: "trivy-image-${{ env.SAFE_NAME }}.txt"
+          format: "json"
+          output: "trivy-image-${{ env.SAFE_NAME }}.json"
           exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
           severity: "CRITICAL,HIGH"
         # A matrix job runs once per image in parallel, so you get a
         # separate scan result for each — clearer than one combined wall
         # of output for three unrelated images.
+        # format: json — same reasoning as trivy-config, for future
+        # programmatic aggregation across all the pipeline's findings.
+
+      - name: Print human-readable summary to the log
+        if: always()
+        run: |
+          echo "=== Trivy image findings for ${{ matrix.image }} (CRITICAL/HIGH) ==="
+          jq -r '
+            .Results[]? | select(.Vulnerabilities != null) |
+            .Vulnerabilities[] |
+            "[\(.Severity)] \(.VulnerabilityID) — \(.PkgName) \(.InstalledVersion) (fixed in \(.FixedVersion // "unknown"))"
+          ' "trivy-image-${{ env.SAFE_NAME }}.json" || echo "No findings, or nothing to parse."
 
       - name: Upload Trivy image report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-image-report-${{ env.SAFE_NAME }}
-          path: trivy-image-${{ env.SAFE_NAME }}.txt
+          path: trivy-image-${{ env.SAFE_NAME }}.json
 
   # ---------------------------------------------------------
   # JOB 7: Dynamic scanning (OWASP ZAP baseline)
@@ -347,7 +373,13 @@ jobs:
         # --user root: without this, ZAP's default non-root container user
         # often can't write zap-report.html into the mounted $(pwd) volume,
         # depending on host directory ownership/permissions.
-        # -I removed: FAIL-level ZAP findings now fail this job.
+        #
+        # -I: correcting an earlier mistake — this flag does NOT mean
+        # "report-only, ignore everything." It specifically means "don't
+        # fail the build on WARN-level findings, only on true FAILs."
+        # Without it, ZAP fails the job on any warning at all (missing
+        # security headers, charset mismatches, etc.) — which is stricter
+        # than intended. With -I, genuine FAIL-level findings still block.
 
       - name: Upload ZAP report
         if: always()
