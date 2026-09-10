@@ -50,7 +50,7 @@ services:
       - wpnet
 
   wpcli:
-    image: wordpress:latest
+    image: wordpress:cli
     depends_on:
       db:
         condition: service_healthy
