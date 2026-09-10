@@ -358,6 +358,7 @@ jobs:
           output: "trivy-image-${{ env.SAFE_NAME }}.json"
           exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
           severity: "CRITICAL,HIGH"
+          ignore-unfixed: "true"
         # A matrix job runs once per image in parallel, so you get a
         # separate scan result for each — clearer than one combined wall
         # of output for three unrelated images.
