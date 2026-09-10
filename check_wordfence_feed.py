@@ -88,21 +88,37 @@ def get_feed(api_key):
 def version_in_range(installed: str, from_v: str, from_incl: bool, to_v: str, to_incl: bool) -> bool:
     try:
         v = Version(installed)
-        lo = Version(from_v) if from_v else None
-        hi = Version(to_v) if to_v else None
     except InvalidVersion:
-        return False  # can't compare, skip rather than false-positive
+        return False  # Installed version format is invalid
+
+    # Handle lower bound (ignore wildcard '*' or empty values)
+    lo = None
+    if from_v and from_v != "*":
+        try:
+            lo = Version(from_v)
+        except InvalidVersion:
+            pass
+
+    # Handle upper bound (ignore wildcard '*' or empty values)
+    hi = None
+    if to_v and to_v != "*":
+        try:
+            hi = Version(to_v)
+        except InvalidVersion:
+            pass
 
     if lo is not None:
         if from_incl and v < lo:
             return False
         if not from_incl and v <= lo:
             return False
+
     if hi is not None:
         if to_incl and v > hi:
             return False
         if not to_incl and v >= hi:
             return False
+
     return True
 
 
