@@ -280,25 +280,9 @@ jobs:
       - name: List images from docker-compose.ci.yml
         id: list
         run: |
-          IMAGES_JSON=$(docker compose -f docker-compose.ci.yml config --images | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "Resolved images JSON: $IMAGES_JSON"
-          {
-            echo "images<<IMAGES_EOF"
-            echo "$IMAGES_JSON"
-            echo "IMAGES_EOF"
-          } >> "$GITHUB_OUTPUT"
-        # `docker compose config --images` resolves the compose file and
-        # prints one image per line — the same thing Compose itself will
-        # actually pull/build, so this can't drift from reality the way
-        # a manually maintained list could.
-        #
-        # map(select(length > 0)) drops any empty lines regardless of how
-        # many trailing newlines the command produces.
-        #
-        # Heredoc-style output (images<<IMAGES_EOF ... IMAGES_EOF) is
-        # GitHub's more robust GITHUB_OUTPUT format, used here after the
-        # simpler "images=$VALUE" form produced an empty value downstream
-        # despite the value printing correctly in this step's own log.
+          IMAGES_JSON=$(docker compose -f docker-compose.ci.yml config --images | tr -d '\r' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "Detected images: $IMAGES_JSON"
+          echo "images=$IMAGES_JSON" >> "$GITHUB_OUTPUT"
 
       - name: Verify GITHUB_OUTPUT actually contains it
         run: cat "$GITHUB_OUTPUT"
