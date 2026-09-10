@@ -313,7 +313,8 @@ jobs:
     needs: detect-images
     steps:
       - name: Print the raw output value
-        run: echo 'Value seen by a dependent job: ${{ needs.detect-images.outputs.images }}'
+        run: |
+          echo "Value seen by a dependent job: ${{ needs.detect-images.outputs.images }}"
 
   # ---------------------------------------------------------
   # JOB 6: Container image vulnerability scanning (Trivy image)
