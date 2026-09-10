@@ -531,6 +531,7 @@ jobs:
     if: always()
     needs: [trivy-config, trivy-image, wp-security-audit, zap-baseline]
     permissions:
+      contents: read
       pull-requests: write   # job-level override; workflow default is read-only
     steps:
       - name: Checkout code
