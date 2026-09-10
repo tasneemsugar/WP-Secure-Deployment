@@ -276,15 +276,24 @@ jobs:
           echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-      
+
       - name: List images from docker-compose.ci.yml
         id: list
         run: |
-          IMAGES_JSON=$(docker compose -f docker-compose.ci.yml config --images | jq -R -s -c 'split("\n")[:-1]')
+          IMAGES_JSON=$(docker compose -f docker-compose.ci.yml config --images | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "Resolved images JSON: $IMAGES_JSON"
           echo "images=$IMAGES_JSON" >> "$GITHUB_OUTPUT"
         # `docker compose config --images` resolves the compose file and
         # prints one image per line — the same thing Compose itself will
         # actually pull/build, so this can't drift from reality the way
+        # a manually maintained list could.
+        #
+        # map(select(length > 0)) drops any empty lines regardless of how
+        # many trailing newlines the command produces — more robust than
+        # assuming exactly one, which silently mis-handled edge cases.
+        #
+        # The "Resolved images JSON" echo exists purely for debugging —
+        # GITHUB_OUTPUT values aren't otherwise visible in the log.
         # a manually maintained list could.
 
   # ---------------------------------------------------------
