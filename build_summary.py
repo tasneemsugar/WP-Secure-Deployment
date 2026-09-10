@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Aggregates findings from the security pipeline's JSON artifacts into a
-single markdown summary, suitable for posting as a PR comment.
+single md summary, suitable for posting as a PR comment.
 
 Usage:
     python3 build_summary.py <reports_dir>
