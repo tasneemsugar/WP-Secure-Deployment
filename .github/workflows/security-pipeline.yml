@@ -37,7 +37,7 @@ jobs:
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
       
       - name: Build and start containers
-        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
+        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build --no-cache
 
       - name: Wait for WordPress to respond
         run: |
@@ -334,12 +334,22 @@ jobs:
   # ---------------------------------------------------------
   trivy-image:
     runs-on: ubuntu-latest
-    needs: detect-images
+    needs: [detect-images, build-and-verify]
     strategy:
       fail-fast: false   # one image failing shouldn't cancel scans of the others
       matrix:
         image: ${{ fromJson(needs.detect-images.outputs.images) }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          echo "MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}" >> .env
+          echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
+          echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
+          echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
+          
       - name: Sanitize image name for use in filenames
         run: |
           SAFE_NAME=$(echo "${{ matrix.image }}" | tr '/:' '--')
