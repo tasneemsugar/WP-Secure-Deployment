@@ -34,6 +34,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile.wordpress
     image: wordpress:7.1-apache
+    ports:
+      - "0:80"
     depends_on:
       db:
         condition: service_healthy
