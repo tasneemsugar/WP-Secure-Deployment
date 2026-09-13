@@ -27,20 +27,25 @@ def load_json(path):
 
 
 def checkov_config_section(reports_dir):
-    # Parses Checkov's output — Trivy doesn't support docker-compose.yml
-    # misconfiguration scanning at all, so this job uses Checkov instead.
-    # Checkov's output_file_path behavior has varied across versions, so
-    # check both a direct file and a directory containing the real report.
     base = os.path.join(reports_dir, "checkov-config-report")
+    
+    # Check direct files or nested files inside subdirectories
     candidates = [
         os.path.join(base, "checkov-report.json"),
         os.path.join(base, "checkov-report.json", "results_json.json"),
+        os.path.join(base, "checkov-report.json", "checkov-report.json"),
+        os.path.join(base, "results_json.json"),
     ]
+    
+    # Also search dynamically for any .json file under checkov-config-report
+    candidates.extend(glob.glob(os.path.join(base, "**", "*.json"), recursive=True))
+
     data = None
     for path in candidates:
-        data = load_json(path)
-        if data:
-            break
+        if os.path.isfile(path):
+            data = load_json(path)
+            if data:
+                break
 
     if not data:
         return "### IaC config (Checkov, docker-compose)\n\n_No report found or nothing to parse._\n"
