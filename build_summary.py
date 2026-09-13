@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Aggregates findings from the security pipeline's JSON artifacts into a
-single md summary, suitable for posting as a PR comment.
+single markdown summary, suitable for posting as a PR comment.
 
 Usage:
     python3 build_summary.py <reports_dir>
@@ -26,23 +26,40 @@ def load_json(path):
         return None
 
 
-def trivy_config_section(reports_dir):
-    path = os.path.join(reports_dir, "trivy-config-report", "trivy-config-report.json")
-    data = load_json(path)
+def checkov_config_section(reports_dir):
+    # Parses Checkov's output — Trivy doesn't support docker-compose.yml
+    # misconfiguration scanning at all, so this job uses Checkov instead.
+    # Checkov's output_file_path behavior has varied across versions, so
+    # check both a direct file and a directory containing the real report.
+    base = os.path.join(reports_dir, "checkov-config-report")
+    candidates = [
+        os.path.join(base, "checkov-report.json"),
+        os.path.join(base, "checkov-report.json", "results_json.json"),
+    ]
+    data = None
+    for path in candidates:
+        data = load_json(path)
+        if data:
+            break
+
     if not data:
-        return "### IaC config (Trivy)\n\n_No report found or nothing to parse._\n"
+        return "### IaC config (Checkov, docker-compose)\n\n_No report found or nothing to parse._\n"
 
-    rows = []
-    for result in data.get("Results", []) or []:
-        for mc in result.get("Misconfigurations", []) or []:
-            rows.append((mc.get("Severity", "?"), mc.get("ID", "?"), mc.get("Title", "?")))
+    failed = (data.get("results") or {}).get("failed_checks") or []
 
-    if not rows:
-        return "### IaC config (Trivy)\n\n✅ No CRITICAL/HIGH misconfigurations found.\n"
+    if not failed:
+        return "### IaC config (Checkov, docker-compose)\n\n✅ No failed checks.\n"
 
-    lines = ["### IaC config (Trivy)\n", "| Severity | ID | Title |", "|---|---|---|"]
-    for sev, id_, title in rows:
-        lines.append(f"| {sev} | {id_} | {title} |")
+    lines = [
+        "### IaC config (Checkov, docker-compose)\n",
+        "| Check ID | Name | Resource |",
+        "|---|---|---|",
+    ]
+    for check in failed:
+        lines.append(
+            f"| {check.get('check_id', '?')} | {check.get('check_name', '?')} | "
+            f"{check.get('resource', '?')} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -130,7 +147,7 @@ def main():
     reports_dir = sys.argv[1]
 
     sections = [
-        trivy_config_section(reports_dir),
+        checkov_config_section(reports_dir),
         trivy_image_section(reports_dir),
         wordfence_section(reports_dir),
         other_checks_section(),
