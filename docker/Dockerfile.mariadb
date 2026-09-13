@@ -1,0 +1,6 @@
+FROM mariadb:11.4
+
+# Upgrade Debian/Ubuntu base packages inside MariaDB image
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    rm -rf /var/lib/apt/lists/*

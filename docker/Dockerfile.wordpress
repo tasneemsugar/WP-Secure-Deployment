@@ -1,0 +1,6 @@
+FROM wordpress:7.1-apache
+
+# Upgrade all Debian OS packages (fixes imagemagick, libperl, glib, etc.)
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    rm -rf /var/lib/apt/lists/*
