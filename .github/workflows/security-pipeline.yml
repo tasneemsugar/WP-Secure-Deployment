@@ -54,7 +54,7 @@ jobs:
       - name: Wait for WordPress health check
         run: |
           echo "Waiting for WordPress at $WP_URL..."
-          until curl -s "$WP_URL" | grep -q "WordPress"; do
+          until curl -sL "$WP_URL" | grep -qi "WordPress"; do
             sleep 3
           done
           echo "WordPress is online!"
