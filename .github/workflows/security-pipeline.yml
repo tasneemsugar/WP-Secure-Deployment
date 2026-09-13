@@ -36,32 +36,32 @@ jobs:
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
       
-      - name: Clean up existing containers
-        if: always()
-        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
-      
-      - name: Build and start containers
+      - name: Build and start containers with dynamic ports
         run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci build --no-cache
-          docker compose -f docker-compose.ci.yml -p wp-ci up -d
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} build --no-cache
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} up -d
 
-      - name: Wait for WordPress to respond
+      - name: Get dynamically assigned WordPress host port
         run: |
-          for i in {1..30}; do
-            if curl -sf http://localhost:8080 > /dev/null; then
-              echo "WordPress is up"
-              exit 0
-            fi
-            echo "Waiting for WordPress... ($i)"
-            sleep 5
+          # Query docker compose port to resolve the assigned host port for container port 80
+          WP_PORT=$(docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} port wordpress 80 | cut -d: -f2)
+          echo "WordPress is running on dynamic host port: $WP_PORT"
+          
+          # Export to GITHUB_ENV so subsequent steps in this job can use $WP_PORT
+          echo "WP_PORT=$WP_PORT" >> "$GITHUB_ENV"
+          echo "WP_URL=http://localhost:$WP_PORT" >> "$GITHUB_ENV"
+
+      - name: Wait for WordPress health check
+        run: |
+          echo "Waiting for WordPress at $WP_URL..."
+          until curl -s "$WP_URL" | grep -q "WordPress"; do
+            sleep 3
           done
-          echo "WordPress did not become healthy in time"
-          docker compose -f docker-compose.ci.yml -p wp-ci logs
-          exit 1
+          echo "WordPress is online!"
 
-      - name: Tear down
+      - name: Clean up stack
         if: always()
-        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
+        run: docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} down -v --remove-orphans
 
   # ---------------------------------------------------------
   # JOB 2: Secrets scanning
