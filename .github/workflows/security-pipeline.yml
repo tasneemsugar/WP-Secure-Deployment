@@ -1,18 +1,12 @@
 name: WordPress Security Pipeline
 
-# Runs on every push and PR. Each job is a separate "gate" —
-# in Week 2 you'll add more jobs (Trivy, Hadolint, ZAP, etc.)
-# and can make later jobs depend on earlier ones with `needs:`.
+# Runs on every push and PR.
 on:
   push:
     branches: [dev, main]
   pull_request:
     branches: [main]
 
-# gitleaks-action needs to read PR commit data to scan a pull request's
-# changes; some accounts default GITHUB_TOKEN to a minimal scope that
-# excludes this, causing a 403 "Resource not accessible by integration".
-# Granting it explicitly here fixes that without widening anything else.
 permissions:
   contents: read
   pull-requests: read
@@ -21,7 +15,6 @@ jobs:
 
   # ---------------------------------------------------------
   # JOB 1: Build & smoke-test the stack
-  # Proves docker-compose still builds and comes up healthy.
   # ---------------------------------------------------------
   build-and-verify:
     runs-on: self-hosted
@@ -35,7 +28,7 @@ jobs:
           echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-      
+
       - name: Build and start containers with dynamic ports
         run: |
           docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} build --no-cache
@@ -43,11 +36,8 @@ jobs:
 
       - name: Get dynamically assigned WordPress host port
         run: |
-          # Query docker compose port to resolve the assigned host port for container port 80
           WP_PORT=$(docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} port wordpress 80 | cut -d: -f2)
           echo "WordPress is running on dynamic host port: $WP_PORT"
-          
-          # Export to GITHUB_ENV so subsequent steps in this job can use $WP_PORT
           echo "WP_PORT=$WP_PORT" >> "$GITHUB_ENV"
           echo "WP_URL=http://localhost:$WP_PORT" >> "$GITHUB_ENV"
 
@@ -65,8 +55,6 @@ jobs:
 
   # ---------------------------------------------------------
   # JOB 2: Secrets scanning
-  # Fails the build if credentials/keys are found in the diff
-  # or in git history (depending on gitleaks config used).
   # ---------------------------------------------------------
   secrets-scan:
     runs-on: ubuntu-latest
@@ -74,22 +62,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history so gitleaks can scan past commits too
+          fetch-depth: 0
 
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE not needed for the open-source/public-repo use case
 
   # ---------------------------------------------------------
   # JOB 3: WordPress security audit (Wordfence feed + wp-cli)
-  # Replaces the earlier WPScan-based approach entirely. Pulls
-  # installed plugin versions via wp-cli, cross-references them
-  # against the Wordfence Intelligence vulnerability feed, and
-  # separately lists registered usernames — the one thing WPScan
-  # was doing that this doesn't otherwise cover (a different kind
-  # of finding: information disclosure, not a version/CVE issue).
   # ---------------------------------------------------------
   wp-security-audit:
     runs-on: self-hosted
@@ -105,22 +86,28 @@ jobs:
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
 
-      
       - name: Start the stack
-        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
+        run: docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} up -d --build
 
-      - name: Wait for WordPress
+      - name: Get dynamically assigned WordPress host port
         run: |
-          for i in {1..30}; do
-            curl -sf http://localhost:8080 > /dev/null && break
-            sleep 5
+          WP_PORT=$(docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} port wordpress 80 | cut -d: -f2)
+          echo "WP_PORT=$WP_PORT" >> "$GITHUB_ENV"
+          echo "WP_URL=http://localhost:$WP_PORT" >> "$GITHUB_ENV"
+
+      - name: Wait for WordPress health check
+        run: |
+          echo "Waiting for WordPress at $WP_URL..."
+          until curl -sL "$WP_URL" | grep -qi "WordPress"; do
+            sleep 3
           done
+          echo "WordPress is online!"
 
       - name: Install WordPress (fresh test instance)
         run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
             wp core install \
-            --url="http://localhost:8080" \
+            --url="$WP_URL" \
             --title="Security Test Site" \
             --admin_user="admin" \
             --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
@@ -129,29 +116,20 @@ jobs:
 
       - name: Install a known-vulnerable plugin (deliberate test target)
         run: |
-          # Copy the zip from the runner into the container's /tmp directory
-          docker compose -f docker-compose.ci.yml -p wp-ci cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
-
-          # Install using the path inside the container
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
             wp plugin install /tmp/plugin.zip --force --activate
-        
-        # WPScan/the watchlist check have something real to detect —
-        # not used or exploited, just present as a scan target.
 
       - name: List installed plugins via wp-cli
         run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
             wp plugin list --format=csv | tee plugin-list.csv
 
       - name: List registered usernames via wp-cli
         run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
             wp user list --field=user_login | tee user-list.txt
-          echo "::notice::Registered usernames are visible above. On a real"
-          echo "site, an easily-guessable username (like 'admin') paired with"
-          echo "a weak password is a common attack path — this step just"
-          echo "surfaces what's exposed, it doesn't attempt any login."
+          echo "::notice::Registered usernames are visible above."
 
       - name: Check plugins against Wordfence Intelligence feed
         env:
@@ -159,7 +137,6 @@ jobs:
         run: |
           pip install packaging --break-system-packages --quiet
           python3 check_wordfence_feed.py plugin-list.csv
-        # No longer continue-on-error: a real CVE match now fails the job.
 
       - name: Compare against manual watchlist
         run: |
@@ -171,11 +148,8 @@ jobs:
               fi
             done < vuln-watchlist.txt
           else
-            echo "No vuln-watchlist.txt found — create one with plugin names/versions you know are vulnerable, one per line."
+            echo "No vuln-watchlist.txt found."
           fi
-        # Kept as a manual backstop for anything you've researched yourself
-        # that the automated feed check above might not catch (e.g. very
-        # recent disclosures, or the free feed lagging Patchstack's paid tier).
 
       - name: Upload plugin & user lists
         if: always()
@@ -189,12 +163,10 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
+        run: docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} down -v --remove-orphans
 
   # ---------------------------------------------------------
   # JOB 4: Static analysis (Semgrep)
-  # Catches insecure code patterns in any custom PHP you've
-  # written or modified (custom plugins, mu-plugins, theme edits).
   # ---------------------------------------------------------
   semgrep:
     runs-on: ubuntu-latest
@@ -212,17 +184,7 @@ jobs:
             p/secrets
 
   # ---------------------------------------------------------
-  # JOB 5: IaC misconfiguration scanning (Trivy config)
-  # Scans docker-compose.ci.yml for insecure settings — things
-  # like missing resource limits, risky capabilities, exposed
-  # ports beyond what's intended. No running stack needed, this
-  # just reads the compose file itself.
-  #
-  # NOTE — no Hadolint job yet: your services all use pre-built
-  # official images (mariadb, wordpress, wpcli) with no custom
-  # Dockerfile to lint. If you ever add one (a custom plugin build
-  # step, a hardened base image, etc.), add a Hadolint job here
-  # following the same pattern as the jobs below.
+  # JOB 5: IaC misconfiguration scanning (Checkov config)
   # ---------------------------------------------------------
   checkov-config:
     runs-on: ubuntu-latest
@@ -261,10 +223,6 @@ jobs:
 
   # ---------------------------------------------------------
   # JOB 5b: Detect images from docker-compose.ci.yml
-  # Reads the actual compose file's resolved image list, rather than
-  # hardcoding image tags separately in this workflow — so updating an
-  # image version in one place (the compose file) is enough; nothing
-  # here can drift out of sync with it.
   # ---------------------------------------------------------
   detect-images:
     runs-on: ubuntu-latest
@@ -280,7 +238,7 @@ jobs:
           echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-      
+
       - name: List images from docker-compose.ci.yml
         id: list
         run: |
@@ -298,7 +256,6 @@ jobs:
           except Exception:
               pass
 
-          # Fallback: Parse docker-compose.ci.yml directly if docker compose returned empty
           if not images:
               try:
                   with open("docker-compose.ci.yml", "r") as f:
@@ -306,7 +263,6 @@ jobs:
               except Exception:
                   pass
 
-          # Default backstop to guarantee valid input for trivy-image matrix
           unique_images = list(dict.fromkeys(images)) if images else ["mariadb:latest", "wordpress:latest", "wordpress:cli"]
           json_output = json.dumps(unique_images)
           print(f"Detected images: {json_output}")
@@ -318,12 +274,7 @@ jobs:
 
       - name: Verify GITHUB_OUTPUT actually contains it
         run: cat "$GITHUB_OUTPUT"
-        # Debug step: directly shows what's in the output file, rather
-        # than trusting that the previous step's write worked as expected.
 
-  # TEMPORARY DEBUG JOB — remove once trivy-image's matrix is confirmed
-  # working again. Isolates whether detect-images' output is broken in
-  # general, or specifically in how strategy.matrix reads it.
   debug-print-images:
     runs-on: ubuntu-latest
     needs: detect-images
@@ -334,15 +285,12 @@ jobs:
 
   # ---------------------------------------------------------
   # JOB 6: Container image vulnerability scanning (Trivy image)
-  # Scans the actual images for known CVEs in OS packages and
-  # language dependencies baked into the image itself. Doesn't
-  # need the stack running — just needs the images pulled.
   # ---------------------------------------------------------
   trivy-image:
     runs-on: ubuntu-latest
     needs: [detect-images, build-and-verify]
     strategy:
-      fail-fast: false   # one image failing shouldn't cancel scans of the others
+      fail-fast: false
       matrix:
         image: ${{ fromJson(needs.detect-images.outputs.images) }}
     steps:
@@ -355,14 +303,12 @@ jobs:
           echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
-          
+
       - name: Sanitize image name for use in filenames
         run: |
           SAFE_NAME=$(echo "${{ matrix.image }}" | tr '/:' '--')
           echo "SAFE_NAME=$SAFE_NAME" >> "$GITHUB_ENV"
-        # matrix.image contains ':' (and sometimes '/'), neither of which
-        # are valid in artifact names or filenames — this swaps them for
-        # '-' so e.g. "wordpress:cli-2-php8.3" becomes a safe filename.
+
       - name: Build target container image locally
         run: |
           echo "Building local image for matrix: ${{ matrix.image }}"
@@ -374,16 +320,10 @@ jobs:
           image-ref: ${{ matrix.image }}
           format: "json"
           output: "trivy-image-${{ env.SAFE_NAME }}.json"
-          exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
+          exit-code: "1"
           severity: "CRITICAL,HIGH"
           ignore-unfixed: "true"
-
-      
-        # A matrix job runs once per image in parallel, so you get a
-        # separate scan result for each — clearer than one combined wall
-        # of output for three unrelated images.
-        # format: json — same reasoning as checkov-config, for future
-        # programmatic aggregation across all the pipeline's findings.
+          trivyignores: "./.trivyignore"
 
       - name: Print human-readable summary to the log
         if: always()
@@ -404,10 +344,6 @@ jobs:
 
   # ---------------------------------------------------------
   # JOB 7: Dynamic scanning (OWASP ZAP baseline)
-  # Runs against the actual live test instance rather than static
-  # files — catches things that only show up at runtime (missing
-  # security headers, exposed paths, etc.). This is the "shift-left
-  # but still verify at runtime" step tying the pipeline together.
   # ---------------------------------------------------------
   zap-baseline:
     runs-on: self-hosted
@@ -424,20 +360,27 @@ jobs:
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
 
       - name: Start the stack
-        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build
+        run: docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} up -d --build
 
-      - name: Wait for WordPress
+      - name: Get dynamically assigned WordPress host port
         run: |
-          for i in {1..30}; do
-            curl -sf http://localhost:8080 > /dev/null && break
-            sleep 5
+          WP_PORT=$(docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} port wordpress 80 | cut -d: -f2)
+          echo "WP_PORT=$WP_PORT" >> "$GITHUB_ENV"
+          echo "WP_URL=http://localhost:$WP_PORT" >> "$GITHUB_ENV"
+
+      - name: Wait for WordPress health check
+        run: |
+          echo "Waiting for WordPress at $WP_URL..."
+          until curl -sL "$WP_URL" | grep -qi "WordPress"; do
+            sleep 3
           done
+          echo "WordPress is online!"
 
       - name: Install WordPress (fresh test instance)
         run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
             wp core install \
-            --url="http://localhost:8080" \
+            --url="$WP_URL" \
             --title="Security Test Site" \
             --admin_user="admin" \
             --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
@@ -446,33 +389,17 @@ jobs:
 
       - name: Install a known-vulnerable plugin (deliberate test target)
         run: |
-          # Copy the zip from the runner into the container's /tmp directory
-          docker compose -f docker-compose.ci.yml -p wp-ci cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
-
-          # Install using the path inside the container
-          docker compose -f docker-compose.ci.yml -p wp-ci exec -T wpcli \
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
+          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
             wp plugin install /tmp/plugin.zip --force --activate
-        
-        # WPScan/the watchlist check have something real to detect —
-        # not used or exploited, just present as a scan target.
 
       - name: Run ZAP baseline scan
         run: |
           docker run --network host --user root -v $(pwd):/zap/wrk/:rw \
             zaproxy/zap-stable zap-baseline.py \
-            -t http://localhost:8080 \
+            -t $WP_URL \
             -r zap-report.html \
             -I
-        # --user root: without this, ZAP's default non-root container user
-        # often can't write zap-report.html into the mounted $(pwd) volume,
-        # depending on host directory ownership/permissions.
-        #
-        # -I: correcting an earlier mistake — this flag does NOT mean
-        # "report-only, ignore everything." It specifically means "don't
-        # fail the build on WARN-level findings, only on true FAILs."
-        # Without it, ZAP fails the job on any warning at all (missing
-        # security headers, charset mismatches, etc.) — which is stricter
-        # than intended. With -I, genuine FAIL-level findings still block.
 
       - name: Upload ZAP report
         if: always()
@@ -483,22 +410,10 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v
+        run: docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} down -v --remove-orphans
 
   # ---------------------------------------------------------
   # JOB 8: Deploy to production (CD)
-  # Only runs on a direct push to main — which, given your branch
-  # protection rule, only happens via a PR merge that already passed
-  # every gate above. This job doesn't re-run any checks; it trusts
-  # that main is already known-good and just applies the change.
-  #
-  # This works cleanly here because your self-hosted runner IS the
-  # production VM — deploying is just "update the files, restart the
-  # stack" on the same machine. In a typical real-world setup, CI
-  # infrastructure and production are separate machines, so deployment
-  # usually means SSH-ing out, or using something like Ansible/Kubernetes/
-  # a cloud provider's deploy API — worth knowing this is a simplified
-  # version of a pattern that gets more involved at scale.
   # ---------------------------------------------------------
   deploy:
     runs-on: self-hosted
@@ -510,17 +425,11 @@ jobs:
           git fetch origin main
           git checkout main
           git pull origin main
-        # Uses the actual production working directory on the VM directly,
-        # not the runner's ephemeral checkout — this IS the directory
-        # docker-compose.prod.yml runs from.
 
       - name: Apply the change to the production stack
         run: |
           cd ~/wp/WP-Secure-Deployment
           docker compose -f docker-compose.prod.yml -p wp-prod up -d
-        # No --build unless your change touched something that needs
-        # rebuilding (e.g. a custom Dockerfile, if you add one later).
-        # This restarts only what changed since the last apply.
 
       - name: Confirm the production site responded after deploy
         run: |
@@ -530,22 +439,9 @@ jobs:
           done
           echo "::error::Production did not respond after deploy — check it manually."
           exit 1
-        # Deliberately does NOT roll back automatically — for a learning
-        # project, seeing a real failed deploy and fixing it by hand is
-        # more instructive than papering over it with auto-rollback logic
-        # you haven't built or tested yet.
 
   # ---------------------------------------------------------
   # JOB 9: Security summary (aggregation + PR comment)
-  # Pulls together the JSON artifacts from the scanning jobs into one
-  # consolidated markdown report, posted as a single PR comment — so
-  # you get one place to look instead of clicking through every job's
-  # log and artifact separately. Uses `if: always()` so it still runs
-  # (and reports) even when the jobs it depends on failed, which is
-  # exactly when you want the summary most.
-  #
-  # Only runs on pull_request events, since posting a PR comment needs
-  # a PR to comment on.
   # ---------------------------------------------------------
   security-summary:
     runs-on: ubuntu-latest
@@ -557,23 +453,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-  
+
       - name: Download all report artifacts
         uses: actions/download-artifact@v4
         with:
           path: reports
         continue-on-error: true
-  
+
       - name: Build consolidated summary
         run: python3 build_summary.py reports > summary.md
-  
+
       - name: Upload security summary artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-summary-report
           path: summary.md
-  
+
       - name: Post PR comment or publish Workflow Job Summary
         uses: actions/github-script@v7
         with:
@@ -581,24 +477,23 @@ jobs:
             const fs = require('fs');
             const body = fs.readFileSync('summary.md', 'utf8');
             
-            // Always append the markdown report to the Job Summary tab in Actions UI
             await core.summary.addRaw(body).write();
-  
+
             const prNumber = context.payload.pull_request?.number;
             if (!prNumber) {
               console.log(`Event '${context.eventName}' is not a PR. Outputted summary to GitHub Step Summary.`);
               return;
             }
-  
+
             const marker = '<!-- security-pipeline-summary -->';
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
             });
-  
+
             const existing = comments.find(c => c.body.includes(marker));
-  
+
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
