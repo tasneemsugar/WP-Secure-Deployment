@@ -37,7 +37,9 @@ jobs:
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
       
       - name: Build and start containers
-        run: docker compose -f docker-compose.ci.yml -p wp-ci up -d --build --no-cache
+        run: |
+          docker compose -f docker-compose.ci.yml -p wp-ci build --no-cache
+          docker compose -f docker-compose.ci.yml -p wp-ci up -d
 
       - name: Wait for WordPress to respond
         run: |
