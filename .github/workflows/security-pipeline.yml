@@ -531,58 +531,52 @@ jobs:
     needs: [checkov-config, trivy-image, wp-security-audit, zap-baseline]
     permissions:
       contents: read
-      pull-requests: write   # job-level override; workflow default is read-only
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # Needed for build_summary.py itself, not for any scan data.
- 
+  
       - name: Download all report artifacts
         uses: actions/download-artifact@v4
         with:
           path: reports
         continue-on-error: true
-        # continue-on-error: if every upstream job failed early enough
-        # that no artifacts exist at all, don't let that block the
-        # summary step below — build_summary.py handles missing files
-        # gracefully and reports "no report found" per section instead.
- 
+  
       - name: Build consolidated summary
         run: python3 build_summary.py reports > summary.md
-      
+  
       - name: Upload security summary artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-summary-report
           path: summary.md
- 
-      - name: Post or update PR comment
+  
+      - name: Post PR comment or publish Workflow Job Summary
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('summary.md', 'utf8');
-            const marker = '<!-- security-pipeline-summary -->';
- 
+            
+            // Always append the markdown report to the Job Summary tab in Actions UI
+            await core.summary.addRaw(body).write();
+  
             const prNumber = context.payload.pull_request?.number;
             if (!prNumber) {
-              core.setFailed(
-                `No pull_request number found in the event payload ` +
-                `(event: ${context.eventName}). Skipping comment post rather ` +
-                `than sending a malformed request.`
-              );
+              console.log(`Event '${context.eventName}' is not a PR. Outputted summary to GitHub Step Summary.`);
               return;
             }
- 
+  
+            const marker = '<!-- security-pipeline-summary -->';
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
             });
- 
+  
             const existing = comments.find(c => c.body.includes(marker));
- 
+  
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -598,10 +592,3 @@ jobs:
                 body: body,
               });
             }
-        # Uses context.payload.pull_request.number directly rather than
-        # context.issue.number — the latter came back empty in practice
-        # (producing a malformed .../issues//comments URL and a 404),
-        # even on a genuine pull_request-triggered run. Pulling the number
-        # straight from the event payload is more direct and includes a
-        # clear failure message instead of silently sending a broken request
-        # if it's ever missing again.
