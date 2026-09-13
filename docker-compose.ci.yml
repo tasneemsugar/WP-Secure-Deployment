@@ -10,6 +10,9 @@
 # throwaway test instance that lives for a few minutes.
 services:
   db:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mariadb
     image: mariadb:11.4
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -27,6 +30,9 @@ services:
       retries: 5
 
   wordpress:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.wordpress
     image: wordpress:7.1-apache
     depends_on:
       db:
@@ -50,6 +56,9 @@ services:
       - wpnet
 
   wpcli:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.wpcli
     image: wordpress:cli-2.12.0
     depends_on:
       db:
