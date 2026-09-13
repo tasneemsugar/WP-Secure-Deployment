@@ -363,6 +363,10 @@ jobs:
         # matrix.image contains ':' (and sometimes '/'), neither of which
         # are valid in artifact names or filenames — this swaps them for
         # '-' so e.g. "wordpress:cli-2-php8.3" becomes a safe filename.
+      - name: Build target container image locally
+        run: |
+          echo "Building local image for matrix: ${{ matrix.image }}"
+          docker compose -f docker-compose.ci.yml build --no-cache
 
       - name: Run Trivy image scan
         uses: aquasecurity/trivy-action@master
@@ -373,6 +377,8 @@ jobs:
           exit-code: "1"   # now blocking — CRITICAL/HIGH findings fail the job
           severity: "CRITICAL,HIGH"
           ignore-unfixed: "true"
+
+      
         # A matrix job runs once per image in parallel, so you get a
         # separate scan result for each — clearer than one combined wall
         # of output for three unrelated images.
