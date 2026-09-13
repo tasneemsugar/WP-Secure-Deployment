@@ -13,7 +13,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.mariadb
-    image: mariadb:11.4
+    image: mariadb:11.4-hardened
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
@@ -33,7 +33,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.wordpress
-    image: wordpress:7.1-apache
+    image: wordpress:7.1-apache-hardened
     ports:
       - "0:80"
     depends_on:
@@ -60,7 +60,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.wpcli
-    image: wordpress:cli-2.12.0
+    image: wordpress:cli-2.12.0-hardened
     depends_on:
       db:
         condition: service_healthy
