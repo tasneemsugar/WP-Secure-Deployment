@@ -36,6 +36,9 @@ jobs:
           echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env
           echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
       
+      - name: Clean up existing containers
+        run: docker compose -f docker-compose.ci.yml -p wp-ci down -v --remove-orphans || true
+      
       - name: Build and start containers
         run: |
           docker compose -f docker-compose.ci.yml -p wp-ci build --no-cache
