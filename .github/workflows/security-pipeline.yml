@@ -444,6 +444,7 @@ jobs:
     steps:
       - name: Pull latest main into the production directory
         run: |
+          git config --global --add safe.directory "$PROD_DIR"
           cd "$PROD_DIR"
           git fetch origin main
           git checkout main
