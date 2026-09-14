@@ -116,12 +116,6 @@ jobs:
             --admin_email="test@example.com" \
             --skip-email
 
-      - name: Install a known-vulnerable plugin (deliberate test target)
-        run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
-          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
-            wp plugin install /tmp/plugin.zip --force --activate
-
       - name: List installed plugins via wp-cli
         run: |
           docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
@@ -392,12 +386,6 @@ jobs:
             --admin_password="${{ secrets.CI_WP_ADMIN_PASSWORD }}" \
             --admin_email="test@example.com" \
             --skip-email
-
-      - name: Install a known-vulnerable plugin (deliberate test target)
-        run: |
-          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} cp tests/fixtures/simple-file-list.zip wpcli:/tmp/plugin.zip
-          docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} exec -T wpcli \
-            wp plugin install /tmp/plugin.zip --force --activate
 
       - name: Run ZAP baseline scan
         run: |
