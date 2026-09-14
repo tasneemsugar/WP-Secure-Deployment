@@ -45,7 +45,16 @@ jobs:
       - name: Wait for WordPress health check
         run: |
           echo "Waiting for WordPress at $WP_URL..."
-          until curl -sL "$WP_URL" | grep -qi "WordPress"; do
+          MAX_RETRIES=30
+          COUNT=0
+          until curl -s -o /dev/null -w "%{http_code}" "$WP_URL" | grep -E "200|301|302" > /dev/null; do
+            COUNT=$((COUNT+1))
+            if [ $COUNT -ge $MAX_RETRIES ]; then
+              echo "::error::WordPress failed to respond within 90 seconds."
+              docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} logs
+              exit 1
+            fi
+            echo "Waiting for container startup... (Attempt $COUNT/$MAX_RETRIES)"
             sleep 3
           done
           echo "WordPress is online!"
@@ -100,7 +109,16 @@ jobs:
       - name: Wait for WordPress health check
         run: |
           echo "Waiting for WordPress at $WP_URL..."
-          until curl -sL "$WP_URL" | grep -qi "WordPress"; do
+          MAX_RETRIES=30
+          COUNT=0
+          until curl -s -o /dev/null -w "%{http_code}" "$WP_URL" | grep -E "200|301|302" > /dev/null; do
+            COUNT=$((COUNT+1))
+            if [ $COUNT -ge $MAX_RETRIES ]; then
+              echo "::error::WordPress failed to respond within 90 seconds."
+              docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} logs
+              exit 1
+            fi
+            echo "Waiting for container startup... (Attempt $COUNT/$MAX_RETRIES)"
             sleep 3
           done
           echo "WordPress is online!"
@@ -371,7 +389,16 @@ jobs:
       - name: Wait for WordPress health check
         run: |
           echo "Waiting for WordPress at $WP_URL..."
-          until curl -sL "$WP_URL" | grep -qi "WordPress"; do
+          MAX_RETRIES=30
+          COUNT=0
+          until curl -s -o /dev/null -w "%{http_code}" "$WP_URL" | grep -E "200|301|302" > /dev/null; do
+            COUNT=$((COUNT+1))
+            if [ $COUNT -ge $MAX_RETRIES ]; then
+              echo "::error::WordPress failed to respond within 90 seconds."
+              docker compose -f docker-compose.ci.yml -p wp-ci-${{ github.run_id }} logs
+              exit 1
+            fi
+            echo "Waiting for container startup... (Attempt $COUNT/$MAX_RETRIES)"
             sleep 3
           done
           echo "WordPress is online!"
