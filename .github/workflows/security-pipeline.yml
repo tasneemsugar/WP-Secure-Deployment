@@ -445,8 +445,15 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Pull latest main into the production directory
+        run: |
+          cd ~/wp/WP-Secure-Deployment
+          git fetch origin main
+          git checkout main
+          git pull origin main
+        # Uses the actual production working directory on the VM directly,
+        # not the runner's ephemeral checkout — this IS the directory
+        # docker-compose.prod.yml runs from.
 
       - name: Download all report artifacts
         uses: actions/download-artifact@v4
