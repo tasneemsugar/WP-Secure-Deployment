@@ -1,0 +1,7 @@
+FROM wordpress:cli-2.12.0
+
+USER root
+# Upgrade Alpine packages (fixes libblkid, libcrypto3, libssl3, libexpat)
+# Upgrade Alpine packages with retry resilience for transient DNS hiccups
+RUN for i in 1 2 3; do apk update && break || sleep 3; done && apk upgrade --no-cache
+USER www-data
