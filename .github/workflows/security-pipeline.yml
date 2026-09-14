@@ -446,9 +446,10 @@ jobs:
         run: |
           git config --global --add safe.directory "$PROD_DIR"
           cd "$PROD_DIR"
-          git fetch origin main
+          git fetch "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" main
           git checkout main
-          git pull origin main
+          git reset --hard FETCH_HEAD
+        
       - name: Apply the change to the production stack
         run: |
           cd "$PROD_DIR"
