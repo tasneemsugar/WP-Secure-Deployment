@@ -8,9 +8,7 @@ dev → PR → merge → deploy flow.
 ## Why this exists
 
 This started as a practice project for hands-on DevSecOps: not just running
-security tools once, but building the pipeline architecture around them —
-the part that's usually harder to learn from a tutorial than the tools
-themselves.
+security tools once, but building the pipeline architecture around them.
 
 ## Architecture
 
